@@ -10,7 +10,6 @@ class App {
   constructor() {
     this.clientId = null;
     this.peers = [];
-    selfIdCache.bind(this);
     this.signaling = null;
     this.media = new Media();
     this.currentCall = null;
@@ -298,7 +297,19 @@ class App {
       const busy = p.status === 'in-call' ? '<span class="badge busy">通话中</span>' : '';
       li.appendChild(name);
       const right = document.createElement('div');
-      right.innerHTML = `${badge} ${auto} ${busy}`;
+      right.appendChild(badge);
+      if (auto) {
+        const a = document.createElement('span');
+        a.className = 'badge auto';
+        a.textContent = 'A';
+        right.appendChild(a);
+      }
+      if (busy) {
+        const b = document.createElement('span');
+        b.className = 'badge busy';
+        b.textContent = '通话中';
+        right.appendChild(b);
+      }
       li.appendChild(right);
       if (p.status === 'in-call') li.classList.add('disabled');
       else li.addEventListener('click', () => this._selectPeer(p));
@@ -544,10 +555,6 @@ class App {
     this.requestRecords();
   }
 }
-
-const selfIdCache = {
-  bind(app) { this.app = app; },
-};
 
 const app = new App();
 app.start();
