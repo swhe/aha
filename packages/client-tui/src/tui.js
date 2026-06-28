@@ -120,11 +120,9 @@ class TUI {
       this.screen.key(k, h);
     }
 
-    this.peerList.on('select', (item) => {
-      // item 是 blessed element,我们用 ritems[index] 获取原字符串,再用我们保存的 clientId
-      const idx = this.peerList.items.indexOf(item);
-      const original = this.peerList.ritems[idx];
-      const c = (item && item.clientId) || (original && original.clientId);
+    this.peerList.on('select', (_item) => {
+      const idx = this.peerList.selected || 0;
+      const c = this._peerIdByIndex && this._peerIdByIndex[idx];
       if (c && this.on.selectPeer) this.on.selectPeer(c);
     });
 
@@ -145,13 +143,14 @@ class TUI {
   }
 
   setPeers(peers) {
-    const items = peers.map((p) => {
+    this._peerIdByIndex = {};
+    const items = peers.map((p, i) => {
       const status = p.status === 'in-call' ? '{red-fg}[忙]{/}' : '{green-fg}[空闲]{/}';
       const auto = p.autoAnswer ? '{yellow-fg}[自动]{/}' : '';
       const type = `{${p.deviceType === 'browser' ? 'cyan' : 'magenta'}-fg}${p.deviceType[0].toUpperCase()}{/}`;
       const text = ` ${type} ${status} ${auto} ${p.name.padEnd(20, ' ')} ${shortId(p.clientId)}`;
-      // blessed List 期望字符串(它内部处理 tags),仅用对象保存额外属性
-      return Object.assign([text], { clientId: p.clientId });
+      this._peerIdByIndex[i] = p.clientId;
+      return text;
     });
     this.peerList.setItems(items);
     this.screen.render();
