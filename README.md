@@ -49,12 +49,13 @@ aha/
 |------|------|
 | 服务端发现 | 客户端主动注册 + 心跳(15s),60s 无心跳清理 |
 | P2P 协商 | WebRTC SDP/ICE(STUN: stun.l.google.com:19302) |
-| P2P fallback | ICE 失败时切换到服务端中继(Opus-over-WS) |
+| P2P fallback | ICE 失败时切换到服务端中继(PCM s16le over WS) |
 | 通话记录 | 仅内存,默认名称 `<callerShortId>-<timestamp>` |
 | 自动应答 | `--auto-answer` 启动,仅接听音频(终端 / 浏览器通用) |
 | 远控指令 | 走 WebRTC DataChannel:mute-mic / cam-on / type-switch / global-mute |
-| 唯一ID | MAC地址 SHA-256 前 8 字节 + 4 字节随机 |
-| 中继数据格式 | 浏览器/TUI 之间通过 WS 转发 base64(opus) |
+| 唯一ID | 浏览器特征指纹(SHA-256 或 FNV-1a 回退) 前 8 字节 + 4 字节随机 |
+| 中继数据格式 | TUI↔Browser 中继:PCM s16le 48k mono 20ms 帧,base64 over WS |
+| 非安全上下文兼容 | ID 生成 + getUserMedia 在 http:// 非 loopback 时降级或给出明确提示 |
 
 ## 启动
 
@@ -65,22 +66,69 @@ cd /home/wz/source/aha
 npm install
 ```
 
-### 2. 启动信令服务端(默认 3000 端口)
+### 2. 启动信令服务端
+
+#### 2.1 普通 http(本机 / 127.0.0.1 访问,适合开发)
 
 ```bash
 PORT=3000 npm run start:server
-# 或直接: node packages/server/src/index.js
+# 或: node packages/server/src/index.js
 ```
 
-服务端同时托管浏览器客户端静态文件(访问 `http://localhost:3000/` 即为浏览器客户端)。
+服务端同时托管浏览器客户端静态文件,本机访问 `http://localhost:3000/` 即可。
+
+#### 2.2 HTTPS(LAN 访问,启用麦克风/摄像头必需)
+
+`navigator.mediaDevices.getUserMedia` 只在 **secure context**(https 或 `localhost`/`127.0.0.1`)下可用。
+如果想让手机、平板或局域网内其他电脑访问,必须开 HTTPS。
+
+先生成一份自签证书(SAN 必须包含本机 LAN IP,否则浏览器会拒):
+
+```bash
+# 把 192.168.1.34 换成你机器的实际 IP( hostname -I 查看)
+mkdir -p /tmp/aha-tls && cd /tmp/aha-tls
+openssl req -x509 -newkey rsa:2048 -days 365 -nodes \
+  -subj "/CN=aha-dev" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:192.168.1.34" \
+  -keyout key.pem -out cert.pem
+```
+
+启动 server:
+
+```bash
+cd /home/wz/source/aha
+PORT=3000 \
+TLS_KEY=/tmp/aha-tls/key.pem \
+TLS_CERT=/tmp/aha-tls/cert.pem \
+node packages/server/src/index.js
+```
+
+输出:
+
+```
+[aha-server] listening on https://0.0.0.0:3443
+[aha-server] WebSocket endpoint: wss://0.0.0.0:3443
+```
+
+HTTPS 端口默认是 `PORT + 443`(3000 → 3443)。可设 `HTTPS_PORT=443` 改回标准端口。
+
+**首次浏览器访问**会显示"您的连接不是私密连接"(自签证书):
+- Chrome / Edge:地址栏左侧"高级" → "继续前往 192.168.1.34(不安全)"
+- Safari:"显示详细信息" → "访问此网站"
+- Firefox:"高级" → "接受风险并继续"
+
+只在第一次需要,之后浏览器记住。
+
+> 生产环境请用正规 CA 签发的证书(Let's Encrypt 等),把 `TLS_KEY`/`TLS_CERT` 指过去即可。
 
 ### 3. 启动浏览器客户端
 
-打开 `http://localhost:3000/`,填写显示名,勾选"自动应答"可选,点击"连接"。
+浏览器开 `http://localhost:3000/`(本机)或 `https://192.168.1.34:3443/`(LAN),填写显示名,
+勾选"自动应答"可选,点击"连接"。
 
 ### 4. 启动终端 TUI 客户端
 
-需要安装 ffmpeg + ALSA:
+需要安装 ffmpeg + ALSA(仅 Linux,macOS/WSL 缺声卡驱动):
 
 ```bash
 sudo apt install ffmpeg alsa-utils
@@ -90,8 +138,11 @@ npm run start:tui-auto
 
 # 自定义名称
 node packages/client-tui/src/index.js --name "TUI-Alice"
-# 指定音频设备
+# 指定音频设备(arecord -l / aplay -l 查看)
 node packages/client-tui/src/index.js --capture hw:0,0 --playback hw:0,0
+
+# HTTPS server 时 TUI 也必须用 wss://
+node packages/client-tui/src/index.js --server wss://192.168.1.34:3443 --name "tui-A"
 ```
 
 TUI 客户端按键:
@@ -103,12 +154,35 @@ TUI 客户端按键:
 | `C` | 发起语音呼叫(终端强制为语音) |
 | `V` | 发起视频呼叫(终端降级为语音) |
 | `A` | 接听来电 |
-| `R` | 拒绝来电 / 挂断当前通话 |
+| `R` | 拒绝来电 |
 | `H` | 挂断当前通话 |
 | `M` | 切换本地静音 |
 | `L` | 查看通话记录 |
 | `U` | 切换自动应答(重新连接后生效) |
 | `Q` | 退出 |
+
+## 通话测试
+
+### 浏览器 ↔ 浏览器(同网络)
+
+开两个浏览器窗口(普通 + 隐身),都访问同一个 server URL,选对方 → 语音/视频通话。WebRTC P2P,听到彼此。
+
+### 浏览器 ↔ TUI(中继模式)
+
+1. 浏览器打开 `https://192.168.1.34:3443/`(或 http://localhost:3000/),点"连接"
+2. 终端启动 TUI,确保 server URL 与浏览器一致
+3. TUI 用 `↑/↓` + `Enter` 选中浏览器那一行
+4. 按 `C` 发起呼叫
+5. 浏览器弹出来电 → 点"接听"
+6. 双方听到声音(中继传输 PCM)
+7. TUI 按 `M` 静音/恢复,`H` 挂断
+
+TUI↔Browser 永远走中继(终端无 WebRTC 栈),所以浏览器听到的声音由 server 转发 PCM 帧实现。
+
+### TUI ↔ TUI(中继模式)
+
+两台机器各起一个 TUI,连同一 server,选对方 → `C` 接听即可。两端都用 `ffmpeg + ALSA`。
+
 
 ## 信令协议
 
@@ -137,7 +211,7 @@ TUI 客户端按键:
 | `call-records` | S→C | 通话记录列表 |
 | `relay-start` | C→S | 请求中继(中继模式) |
 | `relay-start-ack` | S→C | 中继建立 |
-| `relay-audio` | C→S→C | Opus 帧透传(base64) |
+| `relay-audio` | C→S→C | 中继音频帧(`encoding: 'pcm-s16le'` 48k mono,base64) |
 | `control` | C→S→C | 远控指令(走 DataChannel 透传) |
 
 ## 通话记录模型
@@ -177,14 +251,12 @@ TUI 客户端按键:
 ## 端到端测试
 
 ```bash
-# 启动服务端
-PORT=3000 node packages/server/src/index.js &
-
-# 在另一终端运行 Playwright 测试
-python3 test-e2e.py
+npm run test:unit         # 单元 + 集成(Node --test)
+npm run test:e2e          # 浏览器端到端(需要 Playwright)
+npm run test:all          # 全部
 ```
 
-测试覆盖:
+E2E 覆盖:
 
 1. 服务端注册 + 在线列表
 2. Browser↔Browser P2P 通话(ICE connected)
@@ -199,3 +271,6 @@ python3 test-e2e.py
 - 通话记录仅在内存,服务重启丢失
 - 浏览器无 STUN 失败自动 TURN 降级(中继 fallback 是 fallback)
 - 自动应答模式仅接听音频,拒绝视频
+- 浏览器在非安全上下文(http:// 非 loopback)不能访问麦克风/摄像头,需用 https 或 localhost;会在 UI 给出明确提示
+- TUI 中继走 PCM(不经 opus),两端都需能写读 s16le 48k mono;带宽 ~96KB/s/stream
+- 自签证书首次访问需在浏览器手动信任;生产请用正规 CA 证书
