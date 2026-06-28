@@ -20,8 +20,9 @@ function detectAlsaDevice(kind) {
 }
 
 class AudioPipeline {
-  constructor({ onOpusFrame, log = () => {} } = {}) {
+  constructor({ onOpusFrame, onError, log = () => {} } = {}) {
     this.onOpusFrame = onOpusFrame || (() => {});
+    this.onError = onError || (() => {});
     this.log = log;
     this.captureProc = null;
     this.playbackProc = null;
@@ -87,6 +88,9 @@ class AudioPipeline {
 
     this.captureProc.on('exit', (code) => {
       this.log(`capture ffmpeg exit code=${code}`);
+      if (code !== 0 && code !== null) {
+        this.onError('capture', code);
+      }
     });
 
     const playbackDev = this._device('playback');
@@ -109,18 +113,31 @@ class AudioPipeline {
 
     this.playbackProc.on('exit', (code) => {
       this.log(`playback ffmpeg exit code=${code}`);
+      if (code !== 0 && code !== null) {
+        this.onError('playback', code);
+      }
     });
 
-    this.playbackProc.stdin.on('error', () => {});
+    this.playbackProc.stdin.on('error', (e) => {
+      this.log('playback stdin error: ' + e.message);
+    });
   }
 
   feedOpus(base64) {
     if (!this.playbackProc || !this.decoder) return;
+    if (this.playbackProc.exitCode !== null) {
+      this.log(`feedOpus: playback ffmpeg already exited (code=${this.playbackProc.exitCode})`);
+      return;
+    }
     try {
       const opus = Buffer.from(base64, 'base64');
       const pcm = this.decoder.decode(opus);
       // pcm 是 Int16 little-endian Buffer
-      this.playbackProc.stdin.write(Buffer.from(pcm));
+      const ok = this.playbackProc.stdin.write(pcm);
+      if (!ok) {
+        // backpressure: wait for drain to avoid unbounded buffering
+        this.playbackProc.stdin.once('drain', () => {});
+      }
     } catch (e) {
       this.log('opus decode error: ' + e.message);
     }

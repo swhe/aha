@@ -244,6 +244,10 @@ function startPipeline() {
   if (state.pipeline) return state.pipeline;
   state.pipeline = new AudioPipeline({
     log,
+    onError: (kind, code) => {
+      const dev = kind === 'capture' ? (opts.capture || 'default') : (opts.playback || 'default');
+      tui.showNotification(`音频${kind === 'capture' ? '采集' : '播放'}失败 (${dev}): ffmpeg exit=${code},请检查 ALSA 设备`);
+    },
     onOpusFrame: (frame) => {
       if (state.currentCall && state.currentCall.relayMode && signaling.isOpen()) {
         signaling.send(MSG.RELAY_AUDIO, {
