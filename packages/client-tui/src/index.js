@@ -24,9 +24,6 @@ program
 
 const opts = program.opts();
 
-const audioBackend = resolveAudioBackend(opts.audioBackend);
-log('audio backend: ' + audioBackend);
-
 const state = {
   clientId: generateClientId(),
   name: opts.name || null,
@@ -59,6 +56,9 @@ const log = (s) => {
     process.stderr.write(`[aha-tui] ${s}\n`);
   }
 };
+
+const audioBackend = resolveAudioBackend(opts.audioBackend);
+log('audio backend: ' + audioBackend);
 
 // 显式注册 SIGPIPE 忽略,避免管道关闭退出
 process.on('SIGPIPE', () => {});
