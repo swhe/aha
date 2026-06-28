@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AHA - 音视频对话</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">●</span>
+      <span class="title">AHA</span>
+    </div>
+    <div class="self-info">
+      <span class="hint">ID:</span>
+      <code id="self-id">…</code>
+      <label class="auto">
+        <input type="checkbox" id="auto-answer"> 自动应答(仅音频)
+      </label>
+      <input type="text" id="display-name" placeholder="显示名" maxlength="24">
+      <button id="connect-btn" class="btn primary">连接</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <div class="panel">
+        <div class="panel-head">
+          <span>在线客户端</span>
+          <span id="peer-count" class="muted">0</span>
+        </div>
+        <ul id="peer-list" class="peer-list"></ul>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <span>通话记录</span>
+          <button id="refresh-records" class="btn small">刷新</button>
+        </div>
+        <ul id="records-list" class="records-list"></ul>
+      </div>
+    </aside>
+
+    <section class="stage">
+      <div class="videos">
+        <div class="video-tile remote">
+          <video id="remote-video" autoplay playsinline></video>
+          <div class="placeholder" id="remote-placeholder">等待通话...</div>
+          <div class="tile-label" id="remote-label">对方</div>
+        </div>
+        <div class="video-tile local">
+          <video id="local-video" autoplay playsinline muted></video>
+          <div class="tile-label">我 <span id="local-state"></span></div>
+        </div>
+      </div>
+
+      <div class="incoming" id="incoming-panel" hidden>
+        <div class="incoming-card">
+          <div class="ring"></div>
+          <div class="info">
+            <div class="from" id="incoming-from">… 来电</div>
+            <div class="type" id="incoming-type">音频通话</div>
+          </div>
+          <div class="actions">
+            <button id="answer-btn" class="btn primary">接听</button>
+            <button id="reject-btn" class="btn danger">拒绝</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <div class="left">
+          <span id="status-text" class="status idle">未连接</span>
+        </div>
+        <div class="center">
+          <button id="call-audio-btn" class="btn" disabled>📞 语音</button>
+          <button id="call-video-btn" class="btn" disabled>📹 视频</button>
+          <button id="answer-main-btn" class="btn primary" disabled>接听</button>
+          <button id="hangup-btn" class="btn danger" disabled>挂断</button>
+          <button id="mute-btn" class="btn" disabled title="静音麦克风">🎙 静音</button>
+          <button id="cam-btn" class="btn" disabled title="摄像头开关">📷 关闭</button>
+        </div>
+        <div class="right">
+          <select id="call-target"></select>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+</div>
+
+<script type="module" src="src/app.js"></script>
+</body>
+</html>

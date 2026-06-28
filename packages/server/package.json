@@ -1,0 +1,9 @@
+{
+  "name": "@aha/server",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.js",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

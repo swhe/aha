@@ -1,0 +1,17 @@
+{
+  "name": "aha",
+  "version": "0.1.0",
+  "private": true,
+  "description": "音视频在线对话系统(信令服务 + 浏览器客户端 + 终端TUI客户端)",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "start:server": "node packages/server/src/index.js",
+    "start:tui": "node packages/client-tui/src/index.js",
+    "start:tui-auto": "node packages/client-tui/src/index.js --auto-answer"
+    },
+  "engines": {
+    "node": ">=18"
+  }
+}

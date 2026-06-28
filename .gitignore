@@ -1,0 +1,33 @@
+# Node / npm
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 环境
+.env
+.env.local
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# Claude Code 本地设置(权限/hook 等)
+.claude/settings.local.json
+.claude/hook-log.txt
+
+# Python (Playwright 测试)
+__pycache__/
+*.pyc
+.pytest_cache/
+.playwright/
+test-results/
+
+# 测试临时文件
+/tmp/

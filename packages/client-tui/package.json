@@ -1,0 +1,12 @@
+{
+  "name": "@aha/client-tui",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.js",
+  "dependencies": {
+    "blessed": "^0.1.81",
+    "commander": "^12.1.0",
+    "opusscript": "^0.1.1",
+    "ws": "^8.18.0"
+  }
+}
