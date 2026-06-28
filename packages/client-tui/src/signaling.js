@@ -3,6 +3,30 @@
 const WebSocket = require('ws');
 const { MSG } = require('./protocol');
 
+// Permit self-signed certs only for non-public hosts so users don't have to
+// set NODE_TLS_REJECT_UNAUTHORIZED=0 in their shell. Public addresses and
+// hostnames still require a trusted cert.
+function shouldTrustTls(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'wss:') return true; // ws:// has no TLS
+    const h = u.hostname.replace(/^\[|\]$/g, ''); // strip brackets on IPv6
+    // Local-loopback and RFC1918 / link-local hosts commonly run self-signed
+    // certs in LAN testing; permit them so users don't have to set
+    // NODE_TLS_REJECT_UNAUTHORIZED=0 manually.
+    if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return true;
+    if (/^10\./.test(h)) return true;
+    if (/^192\.168\./.test(h)) return true;
+    if (/^172\.(1[6-9]|2[0-9]|3[01])\./.test(h)) return true;
+    if (h.endsWith('.local')) return true;
+    if (/^f[cd][0-9a-f]{2}:/i.test(h)) return true; // ULA fc00::/7
+    // public hostnames/IPs: require a real cert
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
 class Signaling {
   constructor({ url, clientId, onMessage, onClose }) {
     this.url = url;
@@ -19,7 +43,9 @@ class Signaling {
   connect(payload) {
     return new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket(this.url);
+        const opts = { rejectUnauthorized: !shouldTrustTls(this.url) };
+        if (process.env.AHA_DEBUG) console.error('[aha-tui] ws connect ' + this.url + ' rejectUnauthorized=' + opts.rejectUnauthorized);
+        this.ws = new WebSocket(this.url, undefined, opts);
       } catch (e) {
         reject(e);
         return;
