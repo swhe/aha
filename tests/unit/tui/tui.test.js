@@ -12,7 +12,7 @@ const stubWidget = () => {
       w.ritems = items.slice();
       w.items = items.map(() => ({}));
     },
-    focus: () => {},
+    focus: () => { w._focused = true; },
     on: () => {},
     key: () => {},
     readInput: () => {},
@@ -58,4 +58,22 @@ test('setPeers: empty list clears items', () => {
   tui.setPeers([{ clientId: 'a', deviceType: 'browser', name: 'x', status: 'online', autoAnswer: false }]);
   tui.setPeers([]);
   assert.equal(tui.peerList.items.length, 0);
+});
+
+test('constructor: peerList receives focus so arrow keys route correctly', () => {
+  const tui = new TUI({ on: {} });
+  assert.equal(tui.peerList._focused, true);
+});
+
+test('setMuted: shows notification on both mute and unmute', () => {
+  const tui = new TUI({ on: {} });
+  let lastStatus = null;
+  const origSetStatus = tui.setStatus.bind(tui);
+  tui.setStatus = (s) => { lastStatus = s; origSetStatus(s); };
+
+  tui.setMuted(true);
+  assert.equal(lastStatus.includes('麦克风已静音'), true);
+
+  tui.setMuted(false);
+  assert.equal(lastStatus.includes('麦克风已恢复'), true);
 });

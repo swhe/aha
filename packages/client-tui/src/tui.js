@@ -76,6 +76,7 @@ class TUI {
     this.dialog = null;
 
     this._bindKeys();
+    this.peerList.focus();
     this.screen.render();
   }
 
@@ -168,6 +169,7 @@ class TUI {
 
   setMuted(muted) {
     if (muted) this.setStatus('{yellow-fg}●{/} 麦克风已静音');
+    else this.setStatus('{green-fg}●{/} 麦克风已恢复');
   }
 
   showNotification(text, duration = 2000) {
