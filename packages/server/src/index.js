@@ -1,7 +1,9 @@
 'use strict';
 
 const http = require('http');
+const https = require('https');
 const { WebSocketServer } = require('ws');
+const fs = require('fs');
 
 const Registry = require('./registry');
 const CallRecords = require('./call-records');
@@ -10,6 +12,9 @@ const SignalingRouter = require('./signaling');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
+const TLS_KEY = process.env.TLS_KEY;
+const TLS_CERT = process.env.TLS_CERT;
+const HTTPS_PORT = parseInt(process.env.HTTPS_PORT || String(PORT + 443), 10);
 
 function broadcastPeers(_msgType, _payload) {}
 
@@ -34,7 +39,6 @@ const relay = new Relay({
 const router = new SignalingRouter({ registry, callRecords, relay });
 
 const path = require('path');
-const fs = require('fs');
 
 const BROWSER_DIR = path.resolve(__dirname, '../../client-browser/public');
 
@@ -49,7 +53,7 @@ function mime(p) {
   return 'application/octet-stream';
 }
 
-const server = http.createServer((req, res) => {
+function handleRequest(req, res) {
   const url = req.url.split('?')[0];
 
   if (url === '/health' || url === '/healthz') {
@@ -85,67 +89,88 @@ const server = http.createServer((req, res) => {
 
   res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end('Not Found\n');
-});
+}
 
-const wss = new WebSocketServer({ server, perMessageDeflate: false });
+function attachWebSocket(server) {
+  const wss = new WebSocketServer({ server, perMessageDeflate: false });
 
-wss.on('connection', (ws, req) => {
-  ws._ahaSession = { clientId: null };
-  ws.isAlive = true;
+  wss.on('connection', (ws, req) => {
+    ws._ahaSession = { clientId: null };
+    ws.isAlive = true;
 
-  ws.on('pong', () => { ws.isAlive = true; });
+    ws.on('pong', () => { ws.isAlive = true; });
 
-  ws.on('message', (data) => {
-    let msg;
-    try {
-      msg = JSON.parse(data.toString());
-    } catch (e) {
-      try { ws.send(JSON.stringify({ type: 'error', payload: { message: 'invalid json' } })); } catch (_) {}
-      return;
-    }
-    router.handle(ws, msg);
+    ws.on('message', (data) => {
+      let msg;
+      try {
+        msg = JSON.parse(data.toString());
+      } catch (e) {
+        try { ws.send(JSON.stringify({ type: 'error', payload: { message: 'invalid json' } })); } catch (_) {}
+        return;
+      }
+      router.handle(ws, msg);
+    });
+
+    ws.on('close', () => {
+      const sid = ws._ahaSession && ws._ahaSession.clientId;
+      if (!sid) return;
+      const current = registry.get(sid);
+      if (current && current.ws === ws) {
+        registry.remove(sid);
+        router.onPeerGone(sid);
+      }
+    });
+
+    ws.on('error', () => {});
   });
 
-  ws.on('close', () => {
-    const sid = ws._ahaSession && ws._ahaSession.clientId;
-    if (!sid) return;
-    // 只移除当前 ws 仍是这个 clientId 的活跃连接时才清理,
-    // 否则可能是被新连接强制关闭的旧 ws
-    const current = registry.get(sid);
-    if (current && current.ws === ws) {
-      registry.remove(sid);
-      router.onPeerGone(sid);
+  const pingInterval = setInterval(() => {
+    for (const ws of wss.clients) {
+      if (ws.isAlive === false) {
+        try { ws.terminate(); } catch (_) {}
+        continue;
+      }
+      ws.isAlive = false;
+      try { ws.ping(); } catch (_) {}
     }
+  }, 30_000);
+
+  wss.on('close', () => clearInterval(pingInterval));
+  return { wss, pingInterval };
+}
+
+const servers = [];
+
+if (TLS_KEY && TLS_CERT) {
+  const tlsOptions = {
+    key: fs.readFileSync(TLS_KEY),
+    cert: fs.readFileSync(TLS_CERT),
+  };
+  const httpsServer = https.createServer(tlsOptions, handleRequest);
+  attachWebSocket(httpsServer);
+  httpsServer.listen(HTTPS_PORT, HOST, () => {
+    console.log(`[aha-server] listening on https://${HOST}:${HTTPS_PORT}`);
+    console.log(`[aha-server] WebSocket endpoint: wss://${HOST}:${HTTPS_PORT}`);
   });
-
-  ws.on('error', () => {});
-});
-
-const pingInterval = setInterval(() => {
-  for (const ws of wss.clients) {
-    if (ws.isAlive === false) {
-      try { ws.terminate(); } catch (_) {}
-      continue;
-    }
-    ws.isAlive = false;
-    try { ws.ping(); } catch (_) {}
-  }
-}, 30_000);
-
-wss.on('close', () => clearInterval(pingInterval));
-
-server.listen(PORT, HOST, () => {
-  console.log(`[aha-server] listening on http://${HOST}:${PORT}`);
-  console.log(`[aha-server] WebSocket endpoint: ws://${HOST}:${PORT}`);
-});
+  servers.push(httpsServer);
+} else {
+  const httpServer = http.createServer(handleRequest);
+  attachWebSocket(httpServer);
+  httpServer.listen(PORT, HOST, () => {
+    console.log(`[aha-server] listening on http://${HOST}:${PORT}`);
+    console.log(`[aha-server] WebSocket endpoint: ws://${HOST}:${PORT}`);
+    console.log(`[aha-server] (set TLS_KEY + TLS_CERT to enable https/wss)`);
+  });
+  servers.push(httpServer);
+}
 
 function shutdown() {
   console.log('[aha-server] shutting down');
   registry.stop();
-  clearInterval(pingInterval);
-  wss.close();
-  server.close(() => process.exit(0));
-  setTimeout(() => process.exit(1), 3000).unref();
+  for (const s of servers) {
+    try { s.close(() => {}); } catch (_) {}
+  }
+  setTimeout(() => process.exit(0), 500).unref();
 }
 
 process.on('SIGINT', shutdown);
