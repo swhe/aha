@@ -4,7 +4,10 @@ import { Media } from './media.js';
 import { generateClientIdAsync } from './id.js';
 import { MSG, shortId, genCallId } from './utils.js';
 
-const DEFAULT_WS = `ws://${location.host || 'localhost:3000'}`;
+// Match the page's scheme so secure-context pages don't trigger mixed-content
+// blocking when opening the WebSocket. location.protocol includes the trailing ':'.
+const _wsScheme = (typeof location !== 'undefined' && location.protocol === 'https:') ? 'wss' : 'ws';
+const DEFAULT_WS = `${_wsScheme}://${(typeof location !== 'undefined' && location.host) || 'localhost:3000'}`;
 
 class App {
   constructor() {
