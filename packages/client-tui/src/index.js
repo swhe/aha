@@ -193,7 +193,7 @@ function _handle(m) {
     }
     case MSG.RELAY_AUDIO: {
       if (state.pipeline && state.currentCall && state.currentCall.callId === m.payload.callId) {
-        state.pipeline.feedOpus(m.payload.data);
+        state.pipeline.feedAudio({ data: m.payload.data, encoding: m.payload.encoding || 'opus' });
       }
       break;
     }
@@ -255,6 +255,7 @@ function startPipeline() {
           seq: frame.seq,
           data: frame.data,
           ts: frame.ts,
+          encoding: frame.encoding || 'pcm-s16le',
         });
       }
     },

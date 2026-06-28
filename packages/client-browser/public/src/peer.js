@@ -1,6 +1,6 @@
 // RTCPeerConnection 封装 + 信令事件转发
 export class Peer {
-  constructor({ signaling, callId, isInitiator, iceServers, onRemoteStream, onIceConnectionStateChange, onDataChannel, onLocalOffer, onLocalAnswer, onLocalIce, onControlMessage, onRelayNeeded }) {
+  constructor({ signaling, callId, isInitiator, iceServers, onRemoteStream, onIceConnectionStateChange, onDataChannel, onLocalOffer, onLocalAnswer, onLocalIce, onControlMessage, onRelayNeeded, onRelayAudio }) {
     this.signaling = signaling;
     this.callId = callId;
     this.isInitiator = isInitiator;
@@ -13,11 +13,13 @@ export class Peer {
     this.onLocalIce = onLocalIce;
     this.onControlMessage = onControlMessage;
     this.onRelayNeeded = onRelayNeeded;
+    this.onRelayAudio = onRelayAudio;
 
     this.pc = new RTCPeerConnection({ iceServers: this.iceServers });
     this.dataChannel = null;
     this.pendingIce = [];
     this.remoteDescSet = false;
+    this._relayPlayer = null;
 
     this.pc.onicecandidate = (e) => {
       if (e.candidate) {
@@ -132,9 +134,66 @@ export class Peer {
     return false;
   }
 
+  _ensureRelayPlayer(sampleRate = 48000, channels = 1) {
+    if (this._relayPlayer && this._relayPlayer.sampleRate === sampleRate && this._relayPlayer.channels === channels) {
+      return this._relayPlayer;
+    }
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return null;
+    const ctx = new AudioContext({ sampleRate, latencyHint: 'interactive' });
+    const gain = ctx.createGain();
+    gain.gain.value = 1.0;
+    gain.connect(ctx.destination);
+    this._relayPlayer = { ctx, gain, sampleRate, channels, queue: [], playing: false };
+    return this._relayPlayer;
+  }
+
+  _drainRelay() {
+    const p = this._relayPlayer;
+    if (!p || p.playing) return;
+    p.playing = true;
+    const tick = () => {
+      if (!this._relayPlayer || p !== this._relayPlayer) { p.playing = false; return; }
+      const item = p.queue.shift();
+      if (!item) { p.playing = false; return; }
+      const src = p.ctx.createBufferSource();
+      src.buffer = item;
+      src.connect(p.gain);
+      src.onended = () => tick();
+      src.start();
+    };
+    tick();
+  }
+
+  feedRelayAudio({ data, encoding }) {
+    if (!data) return;
+    // payload: base64-encoded PCM s16le 48k mono (encoded at TUI capture stage)
+    let raw;
+    try { raw = Uint8Array.from(atob(data), (c) => c.charCodeAt(0)); } catch (_) { return; }
+    if (encoding !== 'pcm-s16le') {
+      // unknown encoding (legacy opus-over-relay); drop until server sends PCM
+      return;
+    }
+    const sampleRate = 48000;
+    const channels = 1;
+    const frameSamples = raw.length / 2; // s16le mono
+    const player = this._ensureRelayPlayer(sampleRate, channels);
+    if (!player) return;
+    const audioBuf = player.ctx.createBuffer(channels, frameSamples, sampleRate);
+    const ch = audioBuf.getChannelData(0);
+    const view = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+    for (let i = 0; i < frameSamples; i++) ch[i] = view.getInt16(i * 2, true) / 32768;
+    player.queue.push(audioBuf);
+    this._drainRelay();
+  }
+
   close() {
     try { this.dataChannel && this.dataChannel.close(); } catch (_) {}
     try { this.pc.close(); } catch (_) {}
+    if (this._relayPlayer) {
+      try { this._relayPlayer.ctx.close(); } catch (_) {}
+      this._relayPlayer = null;
+    }
   }
 
   getStats() {

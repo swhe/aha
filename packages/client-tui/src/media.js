@@ -50,6 +50,7 @@ class AudioPipeline {
     this.encoder = new OpusScript(SAMPLE_RATE, CHANNELS);
     this.encoder.encoder_ctl && (this.encoder.encoder_ctl(4010, 32000), this.encoder.encoder_ctl(4012, 1101)); // bitrate, application=voip
     this.decoder = new OpusScript(SAMPLE_RATE, CHANNELS);
+    this.captureEncoding = 'pcm-s16le';
 
     const captureDev = this._device('capture');
     this.captureProc = spawn('ffmpeg', [
@@ -69,13 +70,11 @@ class AudioPipeline {
       while (buf.length >= FRAME_BYTES) {
         const pcm = buf.slice(0, FRAME_BYTES);
         buf = buf.slice(FRAME_BYTES);
-        try {
-          const opus = this.encoder.encode(pcm, FRAME_SIZE);
-          this._seq++;
-          this.onOpusFrame({ seq: this._seq, data: opus.toString('base64'), ts: Date.now() });
-        } catch (e) {
-          this.log('opus encode error: ' + e.message);
-        }
+        // Emit raw PCM (s16le 48k mono) for relay — keeps browser side trivial
+        // (Web Audio API plays PCM directly). Opus encoding remains available
+        // on this.encoder for future use.
+        this._seq++;
+        this.onOpusFrame({ seq: this._seq, data: pcm.toString('base64'), ts: Date.now(), encoding: 'pcm-s16le' });
       }
     });
 
@@ -123,23 +122,25 @@ class AudioPipeline {
     });
   }
 
-  feedOpus(base64) {
+  feedAudio({ data, encoding }) {
     if (!this.playbackProc || !this.decoder) return;
     if (this.playbackProc.exitCode !== null) {
-      this.log(`feedOpus: playback ffmpeg already exited (code=${this.playbackProc.exitCode})`);
+      this.log(`feedAudio: playback ffmpeg already exited (code=${this.playbackProc.exitCode})`);
       return;
     }
     try {
-      const opus = Buffer.from(base64, 'base64');
-      const pcm = this.decoder.decode(opus);
-      // pcm 是 Int16 little-endian Buffer
-      const ok = this.playbackProc.stdin.write(pcm);
-      if (!ok) {
-        // backpressure: wait for drain to avoid unbounded buffering
-        this.playbackProc.stdin.once('drain', () => {});
+      const raw = Buffer.from(data, 'base64');
+      if (encoding === 'pcm-s16le') {
+        const ok = this.playbackProc.stdin.write(raw);
+        if (!ok) this.playbackProc.stdin.once('drain', () => {});
+        return;
       }
+      // legacy opus-over-relay fallback
+      const pcm = this.decoder.decode(raw);
+      const ok = this.playbackProc.stdin.write(pcm);
+      if (!ok) this.playbackProc.stdin.once('drain', () => {});
     } catch (e) {
-      this.log('opus decode error: ' + e.message);
+      this.log('feedAudio error: ' + e.message);
     }
   }
 

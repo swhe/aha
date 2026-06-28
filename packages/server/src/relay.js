@@ -32,7 +32,13 @@ class Relay {
       target.ws.send(JSON.stringify({
         type: MSG.RELAY_AUDIO,
         from: fromId,
-        payload: { callId, seq: payload.seq, data: payload.data, ts: payload.ts },
+        payload: {
+          callId,
+          seq: payload.seq,
+          data: payload.data,
+          ts: payload.ts,
+          encoding: payload.encoding || 'opus',
+        },
       }));
       return true;
     } catch (e) {

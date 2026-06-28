@@ -48,3 +48,30 @@ test('ffmpeg: silent audio generation runs and emits PCM', async () => {
   // 0.1s @ 48kHz mono 16-bit = 9600 bytes
   assert.ok(total.length >= 9000, `expected ~9600 PCM bytes, got ${total.length}`);
 });
+
+test('AudioPipeline.feedAudio: forwards pcm-s16le payload to playback stdin', () => {
+  const { AudioPipeline } = require('../../../packages/client-tui/src/media');
+  const written = [];
+  const p = new AudioPipeline({
+    onOpusFrame: () => {},
+    log: () => {},
+  });
+  // Stub decoder and playbackProc
+  p.decoder = { decode: () => Buffer.alloc(0) };
+  p.playbackProc = { exitCode: null, stdin: { write: (b) => { written.push(Buffer.from(b)); return true; }, once: () => {} } };
+  const pcm = Buffer.alloc(FRAME_SIZE * 2, 0);
+  for (let i = 0; i < FRAME_SIZE; i++) pcm.writeInt16LE(i % 1000, i * 2);
+  p.feedAudio({ data: pcm.toString('base64'), encoding: 'pcm-s16le' });
+  assert.equal(written.length, 1);
+  assert.ok(written[0].equals(pcm), 'written buffer equals input PCM');
+});
+
+test('AudioPipeline.feedAudio: skips when playbackProc has exited', () => {
+  const { AudioPipeline } = require('../../../packages/client-tui/src/media');
+  let writeCount = 0;
+  const p = new AudioPipeline({ onOpusFrame: () => {}, log: () => {} });
+  p.decoder = { decode: () => Buffer.alloc(0) };
+  p.playbackProc = { exitCode: 1, stdin: { write: () => { writeCount++; return true; }, once: () => {} } };
+  p.feedAudio({ data: Buffer.alloc(10).toString('base64'), encoding: 'pcm-s16le' });
+  assert.equal(writeCount, 0);
+});

@@ -395,6 +395,7 @@ class App {
           this.toast('P2P 失败,切换到中继模式', 'error');
           this.signaling.send(MSG.RELAY_START, { callId, mediaType: type === 'video' ? 'audio' : 'audio' });
         },
+        onRelayAudio: (payload) => this.peer && this.peer.feedRelayAudio(payload),
       });
       peer.addLocalStream(stream);
       this.peer = peer;
@@ -445,6 +446,7 @@ class App {
           this.toast('P2P 失败,切换到中继模式', 'error');
           this.signaling.send(MSG.RELAY_START, { callId, mediaType: 'audio' });
         },
+        onRelayAudio: (payload) => this.peer && this.peer.feedRelayAudio(payload),
       });
       peer.addLocalStream(stream);
       if (sdp && sdp !== 'terminal-call-no-sdp') {
