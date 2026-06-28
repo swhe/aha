@@ -9,8 +9,13 @@
   "scripts": {
     "start:server": "node packages/server/src/index.js",
     "start:tui": "node packages/client-tui/src/index.js",
-    "start:tui-auto": "node packages/client-tui/src/index.js --auto-answer"
-    },
+    "start:tui-auto": "node packages/client-tui/src/index.js --auto-answer",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "node --test tests/unit/**/*.test.js",
+    "test:integration": "node --test tests/integration/**/*.test.js",
+    "test:e2e": "python3 -m pytest tests/e2e/ -v",
+    "test:all": "npm test && npm run test:e2e"
+  },
   "engines": {
     "node": ">=18"
   }

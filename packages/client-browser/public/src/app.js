@@ -4,7 +4,7 @@ import { Media } from './media.js';
 import { generateClientIdAsync } from './id.js';
 import { MSG, shortId, genCallId } from './utils.js';
 
-const DEFAULT_WS = `ws://${location.hostname || 'localhost'}:3000`;
+const DEFAULT_WS = `ws://${location.host || 'localhost:3000'}`;
 
 class App {
   constructor() {

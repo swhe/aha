@@ -224,6 +224,9 @@ class SignalingRouter {
         const otherId = meta.callerId === clientId ? meta.calleeId : meta.callerId;
         this.callRecords.update(callId, { status: CALL_STATUS.ENDED });
         this._sendTo(otherId, MSG.CALL_HANGUP, { callId, reason: 'peer-disconnected' });
+        this._sendTo(otherId, MSG.CALL_STATUS_UPDATE, {
+          callId, status: CALL_STATUS.ENDED, reason: 'peer-disconnected',
+        });
         this.relay.stop(callId);
         this._callMeta.delete(callId);
       }

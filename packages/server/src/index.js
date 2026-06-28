@@ -108,7 +108,14 @@ wss.on('connection', (ws, req) => {
 
   ws.on('close', () => {
     const sid = ws._ahaSession && ws._ahaSession.clientId;
-    if (sid) registry.remove(sid);
+    if (!sid) return;
+    // 只移除当前 ws 仍是这个 clientId 的活跃连接时才清理,
+    // 否则可能是被新连接强制关闭的旧 ws
+    const current = registry.get(sid);
+    if (current && current.ws === ws) {
+      registry.remove(sid);
+      router.onPeerGone(sid);
+    }
   });
 
   ws.on('error', () => {});
