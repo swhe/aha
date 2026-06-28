@@ -90,7 +90,7 @@ test('AudioPipeline.feedAudio: skips when playbackProc has exited', () => {
 // env at it, and reload the module fresh.
 
 function loadMediaWithFakeAlsa(captureOut, playbackOut) {
-  const f = path.join(__dirname, '..', '..', '..', '.tmp-fake-alsa.json');
+  const f = `/tmp/aha-test-fake-alsa-${process.pid}.json`;
   fs.writeFileSync(f, JSON.stringify({ capture: captureOut, playback: playbackOut }));
   process.env.AHA_FAKE_ALSA = f;
   return loadMediaFresh();
@@ -144,4 +144,23 @@ test('detectAlsaDevice: when only HDA Analog is available, capture still uses pl
   // still go through the plughw plugin so software can upmix/reroute.
   const { detectAlsaDevice } = loadMediaWithFakeAlsa('card 0: hda [HDA Intel], device 0: ALC285 Analog (*)\n', '');
   assert.equal(detectAlsaDevice('capture'), 'plughw:0,0');
+});
+
+// ----- audio backend resolution -----
+
+test('resolveAudioBackend: explicit "pulse" wins regardless of pactl', () => {
+  const { resolveAudioBackend } = loadMediaFresh();
+  assert.equal(resolveAudioBackend('pulse'), 'pulse');
+});
+
+test('resolveAudioBackend: explicit "alsa" wins regardless of pactl', () => {
+  const { resolveAudioBackend } = loadMediaFresh();
+  assert.equal(resolveAudioBackend('alsa'), 'alsa');
+});
+
+test('resolveAudioBackend: undefined (auto) picks whatever pactl says', () => {
+  const { resolveAudioBackend } = loadMediaFresh();
+  // This box either has pulse or not — either is fine; we just assert the
+  // function returns one of the two known values.
+  assert.match(resolveAudioBackend(undefined), /^(pulse|alsa)$/);
 });

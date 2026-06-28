@@ -55,6 +55,26 @@ function detectAlsaDevice(kind) {
   return `${prefix}:${pick.card},${pick.device}`;
 }
 
+// PulseAudio / PipeWire-Pulse server available? pactl talks to the user's
+// session pulseaudio; on a fresh system without a running pulse daemon this
+// exits non-zero. We use it to auto-pick the audio backend.
+function detectPulseAvailable() {
+  try {
+    _cp.execSync('pactl info 2>/dev/null', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+// Resolve the audio backend the user wants. 'auto' prefers pulse (works
+// for multiple concurrent processes), falls back to alsa.
+function resolveAudioBackend(requested) {
+  if (requested === 'pulse') return 'pulse';
+  if (requested === 'alsa') return 'alsa';
+  return detectPulseAvailable() ? 'pulse' : 'alsa';
+}
+
 class AudioPipeline {
   constructor({ onOpusFrame, onError, log = () => {} } = {}) {
     this.onOpusFrame = onOpusFrame || (() => {});
@@ -69,6 +89,21 @@ class AudioPipeline {
     this._seq = 0;
     this._captureDevice = null;
     this._playbackDevice = null;
+    this.backend = null;
+  }
+
+  setBackend(backend) {
+    this.backend = backend;
+  }
+
+  // For pulse backend: target = source name (capture) / sink name (playback)
+  // or 'default' to use the server's default routing.
+  _target(kind) {
+    if (this.backend === 'pulse') {
+      const explicit = kind === 'capture' ? this._captureDevice : this._playbackDevice;
+      return explicit || 'default';
+    }
+    return this._device(kind);
   }
 
   _device(kind) {
@@ -88,17 +123,12 @@ class AudioPipeline {
     this.decoder = new OpusScript(SAMPLE_RATE, CHANNELS);
     this.captureEncoding = 'pcm-s16le';
 
-    const captureDev = this._device('capture');
-    this.log(`capture device: ${captureDev}`);
-    this.captureProc = spawn('ffmpeg', [
-      '-f', 'alsa',
-      '-i', captureDev,
-      '-ac', String(CHANNELS),
-      '-ar', String(SAMPLE_RATE),
-      '-f', 's16le',
-      '-loglevel', 'info',
-      'pipe:1',
-    ]);
+    const captureDev = this._target('capture');
+    this.log(`capture (${this.backend}): ${captureDev}`);
+    const captureArgs = this.backend === 'pulse'
+      ? ['-f', 'pulse', '-i', captureDev, '-ac', String(CHANNELS), '-ar', String(SAMPLE_RATE), '-f', 's16le', '-loglevel', 'info', 'pipe:1']
+      : ['-f', 'alsa', '-i', captureDev, '-ac', String(CHANNELS), '-ar', String(SAMPLE_RATE), '-f', 's16le', '-loglevel', 'info', 'pipe:1'];
+    this.captureProc = spawn('ffmpeg', captureArgs);
 
     let buf = Buffer.alloc(0);
     this.captureProc.stdout.on('data', (chunk) => {
@@ -133,17 +163,12 @@ class AudioPipeline {
       }
     });
 
-    const playbackDev = this._device('playback');
-    this.log(`playback device: ${playbackDev}`);
-    this.playbackProc = spawn('ffmpeg', [
-      '-f', 's16le',
-      '-ac', String(CHANNELS),
-      '-ar', String(SAMPLE_RATE),
-      '-i', 'pipe:0',
-      '-f', 'alsa',
-      '-loglevel', 'error',
-      playbackDev,
-    ]);
+    const playbackDev = this._target('playback');
+    this.log(`playback (${this.backend}): ${playbackDev}`);
+    const playbackArgs = this.backend === 'pulse'
+      ? ['-f', 's16le', '-ac', String(CHANNELS), '-ar', String(SAMPLE_RATE), '-i', 'pipe:0', '-f', 'pulse', '-loglevel', 'error', playbackDev]
+      : ['-f', 's16le', '-ac', String(CHANNELS), '-ar', String(SAMPLE_RATE), '-i', 'pipe:0', '-f', 'alsa', '-loglevel', 'error', playbackDev];
+    this.playbackProc = spawn('ffmpeg', playbackArgs);
 
     this.playbackProc.stderr.on('data', (d) => {
       const s = d.toString();
@@ -219,4 +244,4 @@ class AudioPipeline {
   }
 }
 
-module.exports = { AudioPipeline, SAMPLE_RATE, CHANNELS, FRAME_SIZE, detectAlsaDevice, listAlsaDevices };
+module.exports = { AudioPipeline, SAMPLE_RATE, CHANNELS, FRAME_SIZE, detectAlsaDevice, listAlsaDevices, detectPulseAvailable, resolveAudioBackend };

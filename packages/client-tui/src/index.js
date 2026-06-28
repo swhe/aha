@@ -4,7 +4,7 @@
 const { Command } = require('commander');
 const { generateClientId, shortId } = require('./id');
 const Signaling = require('./signaling');
-const { AudioPipeline, detectAlsaDevice } = require('./media');
+const { AudioPipeline, detectAlsaDevice, resolveAudioBackend } = require('./media');
 const TUI = require('./tui');
 const { MSG, CALL_STATUS, genCallId } = require('./protocol');
 
@@ -17,11 +17,15 @@ program
   .option('-s, --server <url>', 'signaling server ws URL', DEFAULT_WS)
   .option('-n, --name <name>', 'display name')
   .option('-a, --auto-answer', 'enable auto-answer (audio only)', false)
-  .option('--capture <dev>', 'ALSA capture device (e.g. hw:0,0)')
-  .option('--playback <dev>', 'ALSA playback device (e.g. hw:0,0)')
+  .option('--capture <dev>', 'capture device (hw:X,Y, plughw:X,Y, or pulse source name)')
+  .option('--playback <dev>', 'playback device (hw:X,Y or pulse sink name)')
+  .option('--audio-backend <b>', 'alsa or pulse (default: auto-detect, pulse preferred)')
   .parse(process.argv);
 
 const opts = program.opts();
+
+const audioBackend = resolveAudioBackend(opts.audioBackend);
+log('audio backend: ' + audioBackend);
 
 const state = {
   clientId: generateClientId(),
@@ -245,9 +249,14 @@ function startPipeline() {
   state.pipeline = new AudioPipeline({
     log,
     onError: (kind, code) => {
-      const dev = kind === 'capture' ? (opts.capture || detectAlsaDevice('capture')) : (opts.playback || detectAlsaDevice('playback'));
+      const dev = kind === 'capture'
+        ? (opts.capture || (audioBackend === 'pulse' ? 'pulse:default' : detectAlsaDevice('capture')))
+        : (opts.playback || (audioBackend === 'pulse' ? 'pulse:default' : detectAlsaDevice('playback')));
+      const hint = audioBackend === 'pulse'
+        ? '检查 PulseAudio / pactl list short sources,sinks 是否能看到设备'
+        : '同机 ALSA 设备独占,可能已有另一个 TUI 占用,或加 --audio-backend pulse 切到 PulseAudio';
       tui.showNotification(
-        `音频${kind === 'capture' ? '采集' : '播放'}失败 (${dev}): ffmpeg exit=${code} — 同机 ALSA 设备一次只能被一个进程独占,可能已有另一个 TUI 占用`,
+        `音频${kind === 'capture' ? '采集' : '播放'}失败 (${dev}): ffmpeg exit=${code} — ${hint}`,
       );
     },
     onOpusFrame: (frame) => {
@@ -262,11 +271,15 @@ function startPipeline() {
       }
     },
   });
+  state.pipeline.setBackend(audioBackend);
   state.pipeline.setDevices({ capture: opts.capture, playback: opts.playback });
   state.pipeline.start().catch((e) => {
     log('pipeline start failed: ' + e.message);
+    const hint = audioBackend === 'pulse'
+      ? '检查 PulseAudio 是否在运行 (pactl info)'
+      : '同机 ALSA 设备独占,可能已有另一个 TUI 占用,或加 --audio-backend pulse 切到 PulseAudio';
     tui.showNotification(
-      '音频管线启动失败:同机 ALSA 设备一次只能被一个进程独占,可能已有另一个 TUI 占用,请关闭其它 TUI 后重试',
+      `音频管线启动失败 — ${hint}`,
     );
   });
   return state.pipeline;
