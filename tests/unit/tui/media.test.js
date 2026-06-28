@@ -4,8 +4,17 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const { once } = require('node:events');
+const fs = require('node:fs');
+const path = require('node:path');
 
-const { SAMPLE_RATE, CHANNELS, FRAME_SIZE } = require('../../../packages/client-tui/src/media');
+const MEDIA_PATH = path.join(__dirname, '../../../packages/client-tui/src/media.js');
+
+function loadMediaFresh() {
+  delete require.cache[MEDIA_PATH];
+  return require(MEDIA_PATH);
+}
+
+const { SAMPLE_RATE, CHANNELS, FRAME_SIZE } = loadMediaFresh();
 
 test('media constants: 48kHz mono 20ms', () => {
   assert.equal(SAMPLE_RATE, 48000);
@@ -50,7 +59,7 @@ test('ffmpeg: silent audio generation runs and emits PCM', async () => {
 });
 
 test('AudioPipeline.feedAudio: forwards pcm-s16le payload to playback stdin', () => {
-  const { AudioPipeline } = require('../../../packages/client-tui/src/media');
+  const { AudioPipeline } = loadMediaFresh();
   const written = [];
   const p = new AudioPipeline({
     onOpusFrame: () => {},
@@ -67,11 +76,65 @@ test('AudioPipeline.feedAudio: forwards pcm-s16le payload to playback stdin', ()
 });
 
 test('AudioPipeline.feedAudio: skips when playbackProc has exited', () => {
-  const { AudioPipeline } = require('../../../packages/client-tui/src/media');
+  const { AudioPipeline } = loadMediaFresh();
   let writeCount = 0;
   const p = new AudioPipeline({ onOpusFrame: () => {}, log: () => {} });
   p.decoder = { decode: () => Buffer.alloc(0) };
   p.playbackProc = { exitCode: 1, stdin: { write: () => { writeCount++; return true; }, once: () => {} } };
   p.feedAudio({ data: Buffer.alloc(10).toString('base64'), encoding: 'pcm-s16le' });
   assert.equal(writeCount, 0);
+});
+
+// ----- ALSA device detection -----
+// Use the AHA_FAKE_ALSA env hook in media.js: write a JSON file, point the
+// env at it, and reload the module fresh.
+
+function loadMediaWithFakeAlsa(captureOut, playbackOut) {
+  const f = path.join(__dirname, '..', '..', '..', '.tmp-fake-alsa.json');
+  fs.writeFileSync(f, JSON.stringify({ capture: captureOut, playback: playbackOut }));
+  process.env.AHA_FAKE_ALSA = f;
+  return loadMediaFresh();
+}
+
+const ARECORD_USER = `**** List of CAPTURE Hardware Devices ****
+card 0: sofhdadsp [sof-hda-dsp], device 0: HDA Analog (*) []
+  Subdevices: 1/1
+  Subdevice #0: subdevice #0
+card 0: sofhdadsp [sof-hda-dsp], device 6: DMIC (*) []
+  Subdevices: 1/1
+  Subdevice #0: subdevice #0
+card 0: sofhdadsp [sof-hda-dsp], device 7: DMIC16kHz (*) []
+  Subdevices: 1/1
+  Subdevice #0: subdevice #0
+`;
+
+const APLAY_USER = `**** List of PLAYBACK Hardware Devices ****
+card 0: sofhdadsp [sof-hda-dsp], device 0: HDA Analog (*) []
+  Subdevices: 1/1
+  Subdevice #0: subdevice #0
+card 0: sofhdadsp [sof-hda-dsp], device 3: HDMI 0 (*) []
+  Subdevices: 1/1
+  Subdevice #0: subdevice #0
+`;
+
+test('detectAlsaDevice: capture picks DMIC over HDA Analog', () => {
+  const { detectAlsaDevice } = loadMediaWithFakeAlsa(ARECORD_USER, APLAY_USER);
+  assert.equal(detectAlsaDevice('capture'), 'hw:0,6');
+});
+
+test('detectAlsaDevice: playback picks HDA Analog (first available)', () => {
+  const { detectAlsaDevice } = loadMediaWithFakeAlsa(ARECORD_USER, APLAY_USER);
+  assert.equal(detectAlsaDevice('playback'), 'hw:0,0');
+});
+
+test('detectAlsaDevice: falls back to "default" when arecord/aplay missing', () => {
+  const { detectAlsaDevice } = loadMediaWithFakeAlsa('', '');
+  assert.equal(detectAlsaDevice('capture'), 'default');
+  assert.equal(detectAlsaDevice('playback'), 'default');
+});
+
+test('detectAlsaDevice: USB / headset names also win over HDA Analog', () => {
+  const cap = `card 0: hda [HDA Intel], device 0: ALC285 Analog (*)\ncard 1: webcam [USB Microphone], device 0: USB Audio (*)\n`;
+  const { detectAlsaDevice } = loadMediaWithFakeAlsa(cap, '');
+  assert.equal(detectAlsaDevice('capture'), 'hw:1,0');
 });

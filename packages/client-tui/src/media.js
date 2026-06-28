@@ -1,6 +1,20 @@
 'use strict';
 
-const { spawn } = require('child_process');
+let _cp = require('child_process');
+// Test hook: AHA_FAKE_ALSA=<filename> loads { capture, playback } strings
+// from that JSON file and serves them in place of arecord/aplay output.
+if (process.env.AHA_FAKE_ALSA) {
+  try {
+    const fs = require('fs');
+    const fake = JSON.parse(fs.readFileSync(process.env.AHA_FAKE_ALSA, 'utf8'));
+    _cp = { ..._cp, execSync: (cmd) => {
+      if (cmd.includes('arecord')) return fake.capture || '';
+      if (cmd.includes('aplay')) return fake.playback || '';
+      return '';
+    } };
+  } catch (_) { /* fall through to real child_process */ }
+}
+const { spawn } = _cp;
 const OpusScript = require('opusscript');
 
 const SAMPLE_RATE = 48000;
@@ -8,15 +22,32 @@ const CHANNELS = 1;
 const FRAME_SIZE = 960; // 20ms @ 48kHz
 const FRAME_BYTES = FRAME_SIZE * 2;
 
-function detectAlsaDevice(kind) {
-  // kind: 'capture' or 'playback'
+// Parse `arecord -l` / `aplay -l` output into a list of { card, device, name }.
+function listAlsaDevices(kind) {
   try {
-    const { execSync } = require('child_process');
-    const out = execSync(kind === 'capture' ? 'arecord -l 2>/dev/null' : 'aplay -l 2>/dev/null', { encoding: 'utf8' });
-    const m = out.match(/card (\d+).*?device (\d+)/);
-    if (m) return `hw:${m[1]},${m[2]}`;
-  } catch (_) {}
-  return kind === 'capture' ? 'default' : 'default';
+    const out = _cp.execSync(kind === 'capture' ? 'arecord -l 2>/dev/null' : 'aplay -l 2>/dev/null', { encoding: 'utf8' });
+    const re = /^card (\d+): [^\[]+\[([^\]]*)\][^[]*?device (\d+): ([^\n(]+?)\s*\(/gm;
+    const list = [];
+    let m;
+    while ((m = re.exec(out)) !== null) {
+      list.push({ card: +m[1], device: +m[3], name: m[4].trim() });
+    }
+    return list;
+  } catch (_) {
+    return [];
+  }
+}
+
+// Choose the most likely capture device: prefer DMIC / Mic / USB / headset names
+// over a generic HDA Analog output that often has no input.
+function detectAlsaDevice(kind) {
+  const list = listAlsaDevices(kind);
+  if (list.length === 0) return 'default';
+  // capture: prefer microphone-ish names
+  const micRx = /dmic|mic|usb|headset|webcam|input/i;
+  const mic = list.find((d) => micRx.test(d.name));
+  const pick = mic || list[0];
+  return `hw:${pick.card},${pick.device}`;
 }
 
 class AudioPipeline {
@@ -177,4 +208,4 @@ class AudioPipeline {
   }
 }
 
-module.exports = { AudioPipeline, SAMPLE_RATE, CHANNELS, FRAME_SIZE };
+module.exports = { AudioPipeline, SAMPLE_RATE, CHANNELS, FRAME_SIZE, detectAlsaDevice, listAlsaDevices };
