@@ -9,6 +9,14 @@ export class Media {
 
   async get(enableVideo) {
     await this.stop();
+    // navigator.mediaDevices is undefined on non-secure contexts (plain http on
+    // a non-loopback host). Surface a clear error instead of an opaque
+    // "Cannot read properties of undefined (reading 'getUserMedia')".
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+      const err = new Error('需要安全上下文才能访问麦克风/摄像头:请用 https:// 或 http://localhost/127.0.0.1 访问');
+      err.code = 'NO_MEDIA_DEVICES';
+      throw err;
+    }
     const constraints = {
       audio: {
         echoCancellation: true,
@@ -36,6 +44,11 @@ export class Media {
   }
 
   async ensureVideo() {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+      const err = new Error('需要安全上下文才能访问摄像头:请用 https:// 或 http://localhost/127.0.0.1 访问');
+      err.code = 'NO_MEDIA_DEVICES';
+      throw err;
+    }
     if (!this.localStream || this.localStream.getVideoTracks().length === 0) {
       const fresh = await navigator.mediaDevices.getUserMedia({ video: true });
       const audioTracks = this.localStream ? this.localStream.getAudioTracks() : [];
