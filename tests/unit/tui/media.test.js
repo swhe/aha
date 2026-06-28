@@ -117,12 +117,12 @@ card 0: sofhdadsp [sof-hda-dsp], device 3: HDMI 0 (*) []
   Subdevice #0: subdevice #0
 `;
 
-test('detectAlsaDevice: capture picks DMIC over HDA Analog', () => {
+test('detectAlsaDevice: capture picks DMIC over HDA Analog (with plughw prefix)', () => {
   const { detectAlsaDevice } = loadMediaWithFakeAlsa(ARECORD_USER, APLAY_USER);
-  assert.equal(detectAlsaDevice('capture'), 'hw:0,6');
+  assert.equal(detectAlsaDevice('capture'), 'plughw:0,6');
 });
 
-test('detectAlsaDevice: playback picks HDA Analog (first available)', () => {
+test('detectAlsaDevice: playback picks HDA Analog (raw hw: for low latency)', () => {
   const { detectAlsaDevice } = loadMediaWithFakeAlsa(ARECORD_USER, APLAY_USER);
   assert.equal(detectAlsaDevice('playback'), 'hw:0,0');
 });
@@ -136,5 +136,12 @@ test('detectAlsaDevice: falls back to "default" when arecord/aplay missing', () 
 test('detectAlsaDevice: USB / headset names also win over HDA Analog', () => {
   const cap = `card 0: hda [HDA Intel], device 0: ALC285 Analog (*)\ncard 1: webcam [USB Microphone], device 0: USB Audio (*)\n`;
   const { detectAlsaDevice } = loadMediaWithFakeAlsa(cap, '');
-  assert.equal(detectAlsaDevice('capture'), 'hw:1,0');
+  assert.equal(detectAlsaDevice('capture'), 'plughw:1,0');
+});
+
+test('detectAlsaDevice: when only HDA Analog is available, capture still uses plughw', () => {
+  // Some laptops only expose HDA Analog for both directions; capture should
+  // still go through the plughw plugin so software can upmix/reroute.
+  const { detectAlsaDevice } = loadMediaWithFakeAlsa('card 0: hda [HDA Intel], device 0: ALC285 Analog (*)\n', '');
+  assert.equal(detectAlsaDevice('capture'), 'plughw:0,0');
 });

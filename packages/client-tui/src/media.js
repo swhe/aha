@@ -47,7 +47,12 @@ function detectAlsaDevice(kind) {
   const micRx = /dmic|mic|usb|headset|webcam|input/i;
   const mic = list.find((d) => micRx.test(d.name));
   const pick = mic || list[0];
-  return `hw:${pick.card},${pick.device}`;
+  // Use the `plug` plugin on capture so ALSA does the sample-rate /
+  // channel conversion in software when the hardware only supports e.g.
+  // 16 kHz mono (common for Intel SoF DMIC). Playback keeps raw `hw:` for
+  // minimum latency.
+  const prefix = kind === 'capture' ? 'plughw' : 'hw';
+  return `${prefix}:${pick.card},${pick.device}`;
 }
 
 class AudioPipeline {
@@ -84,13 +89,14 @@ class AudioPipeline {
     this.captureEncoding = 'pcm-s16le';
 
     const captureDev = this._device('capture');
+    this.log(`capture device: ${captureDev}`);
     this.captureProc = spawn('ffmpeg', [
       '-f', 'alsa',
       '-i', captureDev,
       '-ac', String(CHANNELS),
       '-ar', String(SAMPLE_RATE),
       '-f', 's16le',
-      '-loglevel', 'error',
+      '-loglevel', 'info',
       'pipe:1',
     ]);
 
@@ -110,9 +116,13 @@ class AudioPipeline {
     });
 
     this.captureProc.stderr.on('data', (d) => {
+      // Forward every line of ffmpeg's stderr so users can see ALSA's
+      // specific reason (samplerate, channel count, busy, missing device).
+      // The capture stderr is normally short (startup + per-buffer info).
       const s = d.toString();
-      if (s.toLowerCase().includes('error') || s.toLowerCase().includes('device')) {
-        this.log('ffmpeg-capture: ' + s.trim());
+      for (const line of s.split('\n')) {
+        const t = line.trim();
+        if (t) this.log('ffmpeg-capture: ' + t);
       }
     });
 
@@ -124,6 +134,7 @@ class AudioPipeline {
     });
 
     const playbackDev = this._device('playback');
+    this.log(`playback device: ${playbackDev}`);
     this.playbackProc = spawn('ffmpeg', [
       '-f', 's16le',
       '-ac', String(CHANNELS),
