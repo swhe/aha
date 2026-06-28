@@ -4,7 +4,7 @@
 const { Command } = require('commander');
 const { generateClientId, shortId } = require('./id');
 const Signaling = require('./signaling');
-const { AudioPipeline } = require('./media');
+const { AudioPipeline, detectAlsaDevice } = require('./media');
 const TUI = require('./tui');
 const { MSG, CALL_STATUS, genCallId } = require('./protocol');
 
@@ -245,8 +245,10 @@ function startPipeline() {
   state.pipeline = new AudioPipeline({
     log,
     onError: (kind, code) => {
-      const dev = kind === 'capture' ? (opts.capture || 'default') : (opts.playback || 'default');
-      tui.showNotification(`音频${kind === 'capture' ? '采集' : '播放'}失败 (${dev}): ffmpeg exit=${code},请检查 ALSA 设备`);
+      const dev = kind === 'capture' ? (opts.capture || detectAlsaDevice('capture')) : (opts.playback || detectAlsaDevice('playback'));
+      tui.showNotification(
+        `音频${kind === 'capture' ? '采集' : '播放'}失败 (${dev}): ffmpeg exit=${code} — 同机 ALSA 设备一次只能被一个进程独占,可能已有另一个 TUI 占用`,
+      );
     },
     onOpusFrame: (frame) => {
       if (state.currentCall && state.currentCall.relayMode && signaling.isOpen()) {
@@ -263,7 +265,9 @@ function startPipeline() {
   state.pipeline.setDevices({ capture: opts.capture, playback: opts.playback });
   state.pipeline.start().catch((e) => {
     log('pipeline start failed: ' + e.message);
-    tui.showNotification('音频管线启动失败,请检查 ffmpeg 与 ALSA 设备');
+    tui.showNotification(
+      '音频管线启动失败:同机 ALSA 设备一次只能被一个进程独占,可能已有另一个 TUI 占用,请关闭其它 TUI 后重试',
+    );
   });
   return state.pipeline;
 }

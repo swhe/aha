@@ -268,9 +268,21 @@ E2E 覆盖:
 
 - 终端 TUI 不支持视频(只接听/发起音频)
 - 终端 TUI 通话默认走中继模式(终端无法做 WebRTC SDP/ICE)
+- **同机只能跑一个 TUI**——ALSA 设备一次只能被一个进程独占;第二个 TUI 启动时 ffmpeg 会 `Device or resource busy` 然后退出。TUI ↔ 浏览器 / TUI ↔ 不同机的 TUI 都不受影响(浏览器走 PulseAudio/PipeWire,不同机 TUI 占不同硬件)
 - 通话记录仅在内存,服务重启丢失
 - 浏览器无 STUN 失败自动 TURN 降级(中继 fallback 是 fallback)
 - 自动应答模式仅接听音频,拒绝视频
 - 浏览器在非安全上下文(http:// 非 loopback)不能访问麦克风/摄像头,需用 https 或 localhost;会在 UI 给出明确提示
 - TUI 中继走 PCM(不经 opus),两端都需能写读 s16le 48k mono;带宽 ~96KB/s/stream
 - 自签证书首次访问需在浏览器手动信任;生产请用正规 CA 证书
+
+## 测试场景组合
+
+| 客户端 A | 客户端 B | 路径 | 备注 |
+|---------|---------|------|------|
+| 浏览器 | 浏览器(同机) | P2P(ICE) | 同机多浏览器 OK |
+| 浏览器 | 浏览器(异机) | P2P(ICE) 或中继 | 看网络 |
+| 浏览器 | TUI(同机或异机) | 中继(PCM) | 永远中继 |
+| TUI | TUI(异机) | 中继(PCM) | OK |
+| TUI | TUI(**同机**) | ❌ 不可用 | ALSA 设备冲突 |
+| 浏览器(同机) | 浏览器 | + 多个 TUI(异机) | 任意组合 |
