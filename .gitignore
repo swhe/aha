@@ -8,6 +8,7 @@ yarn-error.log*
 .env
 .env.local
 notes.txt
+aha-tls/
 
 # 编辑器
 .vscode/
