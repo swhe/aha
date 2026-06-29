@@ -207,14 +207,17 @@ class TUI {
     const args = this.audioBackend === 'pulse'
       ? ['-f', 's16le', '-ac', '1', '-ar', '48000', '-i', 'pipe:0', '-f', 'pulse', dev]
       : ['-f', 's16le', '-ac', '1', '-ar', '48000', '-i', 'pipe:0', '-f', 'alsa', dev];
-    this._ringProc = spawn('ffmpeg', args, { stdio: ['pipe', 'ignore', 'ignore'] });
-    this._ringProc.stdin.on('error', () => {});
-    this._ringProc.on('exit', () => { this._ringProc = null; });
+    const proc = spawn('ffmpeg', args, { stdio: ['pipe', 'ignore', 'ignore'] });
+    this._ringProc = proc;
+    proc.stdin.on('error', () => {});
+    proc.on('exit', () => {
+      if (this._ringProc === proc) this._ringProc = null;
+    });
     const writeLoop = () => {
-      if (!this._ringProc || !this._ringProc.stdin.writable) return;
-      const ok = this._ringProc.stdin.write(buf);
+      if (this._ringProc !== proc || !proc.stdin.writable) return;
+      const ok = proc.stdin.write(buf);
       if (ok) setImmediate(writeLoop);
-      else this._ringProc.stdin.once('drain', writeLoop);
+      else proc.stdin.once('drain', writeLoop);
     };
     writeLoop();
   }
