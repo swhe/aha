@@ -190,6 +190,20 @@ class TUI {
       style: { border: { fg: 'yellow' } },
       label: ' 来电 ',
     });
+    // Ring the terminal bell every 1.5 s while the dialog is up. Most
+    // terminals (xterm, gnome-terminal, alacritty, wezterm) emit a sound
+    // on BEL (0x07); terminals that don't just ignore it. Stop on
+    // dialog.destroy() via the dialog's `hide` event.
+    if (!this._ringTimer) {
+      this._ringTimer = setInterval(() => {
+        if (!this.dialog) {
+          clearInterval(this._ringTimer);
+          this._ringTimer = null;
+          return;
+        }
+        try { process.stdout.write('\x07'); } catch (_) {}
+      }, 1500);
+    }
     this.dialog.readInput(
       `[${callType === 'video' ? '视频' : '音频'}] ${callerName} (${shortId(callerId)})\n按 Enter 接听 / Esc 拒绝`,
       '',
@@ -198,6 +212,10 @@ class TUI {
         this.dialog.destroy();
         this.dialog = null;
         this.screen.render();
+        if (this._ringTimer) {
+          clearInterval(this._ringTimer);
+          this._ringTimer = null;
+        }
         if (ok) onAnswer && onAnswer();
         else onReject && onReject();
       },

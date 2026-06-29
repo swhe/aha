@@ -22,6 +22,7 @@ class App {
     this.isAutoAnswer = false;
     this.displayName = '';
     this.connected = false;
+    this._ringState = { ctx: null, stopAt: 0, timer: null };
 
     this.$ = (id) => document.getElementById(id);
     this._bindUi();
@@ -140,6 +141,7 @@ class App {
     this.$('incoming-panel').hidden = false;
     this.$('answer-main-btn').disabled = false;
     this.setStatus('来电...', 'ringing');
+    this._startRing();
     // TUI 占位符 sdp:自动走中继模式(忽略浏览器手动接听按钮)
     const isPlaceholder = p.sdp === 'terminal-call-no-sdp';
     if (this.isAutoAnswer && p.callType === 'audio') {
@@ -148,6 +150,57 @@ class App {
     } else if (this.isAutoAnswer && p.callType === 'video') {
       this.toast('自动应答模式只接听音频,拒绝视频', 'error');
       this.reject('auto-answer-audio-only');
+    }
+  }
+
+  _startRing() {
+    this._stopRing();
+    if (typeof window === 'undefined') return;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return; // 无 Web Audio 时静默跳过(已显示可视化提示)
+    let ctx;
+    try { ctx = new AudioCtx(); } catch (_) { return; }
+    const state = this._ringState;
+    state.ctx = ctx;
+    // US-style two-tone ring: 440 Hz / 480 Hz alternating, 1 s on / 2 s off,
+    // wrapping each tone with a short fade to avoid clicks. Repeats until
+    // _stopRing() is called.
+    const playTone = (freq, startAt, dur) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, startAt);
+      gain.gain.linearRampToValueAtTime(0.15, startAt + 0.02);
+      gain.gain.setValueAtTime(0.15, startAt + dur - 0.05);
+      gain.gain.linearRampToValueAtTime(0, startAt + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(startAt);
+      osc.stop(startAt + dur + 0.02);
+    };
+    const cycleSecs = 3.0;
+    const toneDur = 0.4;
+    const startAt = ctx.currentTime + 0.05;
+    playTone(440, startAt, toneDur);
+    playTone(480, startAt + toneDur + 0.05, toneDur);
+    // schedule ahead ~3 s, then reschedule via setInterval (ctx clock keeps
+    // playing even while the JS event loop is busy).
+    let nextAt = startAt + cycleSecs;
+    state.timer = setInterval(() => {
+      if (!state.ctx) return;
+      const now = state.ctx.currentTime;
+      playTone(440, now, toneDur);
+      playTone(480, now + toneDur + 0.05, toneDur);
+      nextAt = now + cycleSecs;
+    }, cycleSecs * 1000);
+  }
+
+  _stopRing() {
+    const state = this._ringState;
+    if (state.timer) { clearInterval(state.timer); state.timer = null; }
+    if (state.ctx) {
+      try { state.ctx.close(); } catch (_) {}
+      state.ctx = null;
     }
   }
 
@@ -174,12 +227,14 @@ class App {
 
   _onCallReject(m) {
     this.toast(`对方${m.payload.reason === 'busy' ? '忙' : '拒绝了'}`, 'error');
+    this._stopRing();
     this._cleanupCall();
     this.setStatus('已连接', 'online');
   }
 
   _onCallHangup(m) {
     this.toast('对方已挂断', 'error');
+    this._stopRing();
     this._cleanupCall();
     this.setStatus('已连接', 'online');
   }
@@ -406,6 +461,7 @@ class App {
   async answer() {
     if (!this.pendingOffer) return;
     const { callId, sdp, callType, callerId, callerName } = this.pendingOffer;
+    this._stopRing();
     try {
       console.log('[aha] answer start, type=', callType);
       const stream = await this.media.get(callType === 'video');
@@ -476,6 +532,7 @@ class App {
     const { callId } = this.pendingOffer;
     this.signaling.send(MSG.CALL_REJECT, { callId, reason: reason || 'reject' });
     this.pendingOffer = null;
+    this._stopRing();
     this.$('incoming-panel').hidden = true;
     this.$('answer-main-btn').disabled = true;
     this.setStatus('已连接', 'online');
