@@ -227,35 +227,18 @@ class App {
         this.toast('对方解除你的静音', 'success');
         break;
       case 'cam-on':
-        if (this.currentCall.callType === 'video') {
-          try {
-            await this.media.ensureVideo();
-            const videoTracks = this.media.localStream.getVideoTracks();
-            for (const t of videoTracks) {
-              const sender = await this.peer.pc.addTrack(t, this.media.localStream);
-              this._videoSenders = this._videoSenders || [];
-              this._videoSenders.push(sender);
-            }
-            this.media.setVideoEnabled(true);
-            this.$('local-video').srcObject = this.media.localStream;
-            this.$('cam-btn').textContent = '📷 关闭';
-            this.$('cam-btn').classList.remove('cam-off');
-            this.toast('对方请求开启你的摄像头', 'success');
-          } catch (e) {
-            this.toast('无法启用摄像头: ' + e.message, 'error');
-          }
-        }
+        // Remote status notification only — the other side has re-enabled
+        // their camera. Do NOT touch our own camera or our own sender: those
+        // are driven by the local cam button. Previous versions of this
+        // handler called ensureVideo() / addTrack() / setVideoEnabled(true)
+        // here, which incorrectly mutated our own state and on cam-off then
+        // disabled our camera too.
+        this.$('local-state').textContent = '对方摄像头:开';
+        this.toast('对方开启了摄像头', 'success');
         break;
       case 'cam-off':
-        if (this._videoSenders) {
-          for (const s of this._videoSenders) {
-            try { await this.peer.pc.removeTrack(s); } catch (_) {}
-          }
-        }
-        this.media.setVideoEnabled(false);
-        this.$('cam-btn').textContent = '📷 开启';
-        this.$('cam-btn').classList.add('cam-off');
-        this.toast('对方请求关闭你的摄像头', 'error');
+        this.$('local-state').textContent = '对方摄像头:关';
+        this.toast('对方关闭了摄像头', 'error');
         break;
       case 'global-mute':
         this.media.setAudioEnabled(false);
