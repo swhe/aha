@@ -1,11 +1,15 @@
 'use strict';
 
 const blessed = require('blessed');
+const { spawn } = require('child_process');
 const { shortId } = require('./id');
+const { detectAlsaDevice } = require('./media');
 
 class TUI {
-  constructor({ on }) {
+  constructor({ on, audioBackend, playbackDevice }) {
     this.on = on || {};
+    this.audioBackend = audioBackend || 'alsa';
+    this.playbackDevice = playbackDevice;
     this.screen = blessed.screen({
       smartCSR: true,
       title: 'AHA Terminal Client',
@@ -127,13 +131,7 @@ class TUI {
       if (c && this.on.selectPeer) this.on.selectPeer(c);
     });
 
-    this.screen.key(['escape'], () => {
-      if (this.dialog) {
-        this.dialog.destroy();
-        this.dialog = null;
-        this.screen.render();
-      }
-    });
+    // Incoming-call dialog handles Escape via question.ask() callback.
   }
 
   setHeader({ clientId, name, autoAnswer, connected, backend }) {
@@ -177,9 +175,71 @@ class TUI {
     this.toast.display(text, duration, () => {});
   }
 
+  _startRing() {
+    if (this._ringProc) return;
+    // Synthesize a two-tone ring (440 Hz 0.4s + 480 Hz 0.4s, 3 s period)
+    // matching the browser's Web Audio ringtone, and play it through ffmpeg.
+    const sampleRate = 48000;
+    const period = 3;
+    const toneDur = 0.4;
+    const totalSamples = sampleRate * period;
+    const buf = Buffer.alloc(totalSamples * 2);
+    for (let i = 0; i < totalSamples; i++) {
+      const t = i / sampleRate;
+      let sample = 0;
+      if (t < toneDur) {
+        sample = Math.sin(2 * Math.PI * 440 * t);
+      } else if (t < toneDur * 2) {
+        sample = Math.sin(2 * Math.PI * 480 * (t - toneDur));
+      }
+      // fade in/out (20 ms) to avoid clicks
+      const fade = 0.02;
+      let env = 1;
+      if (t < fade) env = t / fade;
+      else if (t > toneDur - fade && t < toneDur) env = (toneDur - t) / fade;
+      else if (t > toneDur * 2 - fade && t < toneDur * 2) env = (toneDur * 2 - t) / fade;
+      const val = Math.max(-1, Math.min(1, sample * env * 0.3));
+      buf.writeInt16LE(Math.round(val * 32767), i * 2);
+    }
+    const dev = this.audioBackend === 'pulse'
+      ? 'default'
+      : (this.playbackDevice || detectAlsaDevice('playback'));
+    const args = this.audioBackend === 'pulse'
+      ? ['-f', 's16le', '-ac', '1', '-ar', '48000', '-i', 'pipe:0', '-f', 'pulse', dev]
+      : ['-f', 's16le', '-ac', '1', '-ar', '48000', '-i', 'pipe:0', '-f', 'alsa', dev];
+    this._ringProc = spawn('ffmpeg', args, { stdio: ['pipe', 'ignore', 'ignore'] });
+    this._ringProc.stdin.on('error', () => {});
+    this._ringProc.on('exit', () => { this._ringProc = null; });
+    const writeLoop = () => {
+      if (!this._ringProc || !this._ringProc.stdin.writable) return;
+      const ok = this._ringProc.stdin.write(buf);
+      if (ok) setImmediate(writeLoop);
+      else this._ringProc.stdin.once('drain', writeLoop);
+    };
+    writeLoop();
+  }
+
+  _stopRing() {
+    if (this._ringProc) {
+      try { this._ringProc.stdin.end(); } catch (_) {}
+      try { this._ringProc.kill('SIGTERM'); } catch (_) {}
+      this._ringProc = null;
+    }
+  }
+
+  _cleanupDialogKeys() {
+    if (this._dialogKeyHandlers) {
+      for (const [key, handler] of this._dialogKeyHandlers) {
+        this.screen.removeKey(key, handler);
+      }
+      this._dialogKeyHandlers = null;
+    }
+  }
+
   promptIncoming({ callerName, callerId, callType }, onAnswer, onReject) {
     if (this.dialog) { this.dialog.destroy(); this.dialog = null; }
-    this.dialog = blessed.prompt({
+    this._cleanupDialogKeys();
+    this.dialog = blessed.box({
       parent: this.screen,
       top: 'center',
       left: 'center',
@@ -189,40 +249,33 @@ class TUI {
       tags: true,
       style: { border: { fg: 'yellow' } },
       label: ' 来电 ',
+      content: `\n  [${callType === 'video' ? '视频' : '音频'}] ${callerName} (${shortId(callerId)})\n\n  按 Enter 接听 / Esc 拒绝`,
     });
-    // Ring the terminal bell every 1.5 s while the dialog is up. Most
-    // terminals (xterm, gnome-terminal, alacritty, wezterm) emit a sound
-    // on BEL (0x07); terminals that don't just ignore it. Stop on
-    // dialog.destroy() via the dialog's `hide` event.
-    if (!this._ringTimer) {
-      this._ringTimer = setInterval(() => {
-        if (!this.dialog) {
-          clearInterval(this._ringTimer);
-          this._ringTimer = null;
-          return;
-        }
-        try { process.stdout.write('\x07'); } catch (_) {}
-      }, 1500);
-    }
-    this.dialog.readInput(
-      `[${callType === 'video' ? '视频' : '音频'}] ${callerName} (${shortId(callerId)})\n按 Enter 接听 / Esc 拒绝`,
-      '',
-      (err, value) => {
-        const ok = !err;
-        this.dialog.destroy();
-        this.dialog = null;
-        this.screen.render();
-        if (this._ringTimer) {
-          clearInterval(this._ringTimer);
-          this._ringTimer = null;
-        }
-        if (ok) onAnswer && onAnswer();
-        else onReject && onReject();
-      },
-    );
+    this.screen.render();
+    this._startRing();
+    const onEnter = () => {
+      this._cleanupDialogKeys();
+      this.dialog.destroy();
+      this.dialog = null;
+      this.screen.render();
+      this._stopRing();
+      onAnswer();
+    };
+    const onEsc = () => {
+      this._cleanupDialogKeys();
+      this.dialog.destroy();
+      this.dialog = null;
+      this.screen.render();
+      this._stopRing();
+      onReject();
+    };
+    this.screen.key(['enter'], onEnter);
+    this.screen.key(['escape'], onEsc);
+    this._dialogKeyHandlers = [['enter', onEnter], ['escape', onEsc]];
   }
 
   destroy() {
+    this._stopRing();
     try { this.screen.destroy(); } catch (_) {}
   }
 }

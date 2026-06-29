@@ -37,6 +37,15 @@ const state = {
   records: [],
 };
 
+const log = (s) => {
+  if (process.env.AHA_DEBUG) {
+    process.stderr.write(`[aha-tui] ${s}\n`);
+  }
+};
+
+const audioBackend = resolveAudioBackend(opts.audioBackend);
+log('audio backend: ' + audioBackend);
+
 const tui = new TUI({
   on: {
     call: (type) => startCall(type),
@@ -49,16 +58,9 @@ const tui = new TUI({
     selectPeer: (id) => selectPeer(id),
     quit: () => quit(),
   },
+  audioBackend,
+  playbackDevice: opts.playback,
 });
-
-const log = (s) => {
-  if (process.env.AHA_DEBUG) {
-    process.stderr.write(`[aha-tui] ${s}\n`);
-  }
-};
-
-const audioBackend = resolveAudioBackend(opts.audioBackend);
-log('audio backend: ' + audioBackend);
 
 // 显式注册 SIGPIPE 忽略,避免管道关闭退出
 process.on('SIGPIPE', () => {});

@@ -15,7 +15,9 @@ const stubWidget = () => {
     focus: () => { w._focused = true; },
     on: () => {},
     key: () => {},
+    removeKey: () => {},
     readInput: () => {},
+    ask: () => {},
     destroy: () => {},
     display: () => {},
     render: () => {},
@@ -29,6 +31,7 @@ const stubBlessed = {
   list: () => Object.assign(stubWidget(), { items: [], ritems: [], selected: 0 }),
   message: () => stubWidget(),
   prompt: () => stubWidget(),
+  question: () => Object.assign(stubWidget(), { ask: () => {} }),
 };
 
 const origResolve = Module._resolveFilename;
