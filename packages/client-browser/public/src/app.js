@@ -379,17 +379,25 @@ class App {
         onRemoteStream: (stream) => {
           const v = this.$('remote-video');
           v.srcObject = stream;
-          v.play().catch(() => {});
-          this.$('remote-placeholder').textContent = '';
-          const tracks = stream.getAudioTracks();
-          if (tracks.length > 0 && !tracks[0].enabled) {
-            // 音频关闭
+          // .play() returns a Promise; some browsers reject on first call
+          // if the user gesture chain is stale. Always retry and surface real
+          // errors so a black <video> isn't silent.
+          const playPromise = v.play();
+          if (playPromise && playPromise.then) {
+            playPromise.catch((e) => {
+              console.warn('[aha] remote-video play rejected:', e && e.message);
+            });
           }
+          this.$('remote-placeholder').textContent = '';
+          // Hide the placeholder once we have any track, so it doesn't paint
+          // on top of the <video> with its dark gradient background.
+          this.$('remote-placeholder').hidden = stream && stream.getTracks().length > 0;
         },
         onIceConnectionStateChange: (s) => {
           if (s === 'connected' || s === 'completed') {
             this.setStatus('通话中', 'in-call');
             this.$('remote-placeholder').textContent = '';
+            this.$('remote-placeholder').hidden = true;
           }
         },
         onControlMessage: (msg) => this._handleRemoteControl(msg.action, msg.params),
@@ -434,13 +442,18 @@ class App {
         onRemoteStream: (stream) => {
           const v = this.$('remote-video');
           v.srcObject = stream;
-          v.play().catch(() => {});
+          const playPromise = v.play();
+          if (playPromise && playPromise.then) {
+            playPromise.catch((e) => console.warn('[aha] remote-video play rejected:', e && e.message));
+          }
           this.$('remote-placeholder').textContent = '';
+          this.$('remote-placeholder').hidden = stream && stream.getTracks().length > 0;
         },
         onIceConnectionStateChange: (s) => {
           if (s === 'connected' || s === 'completed') {
             this.setStatus('通话中', 'in-call');
             this.$('remote-placeholder').textContent = '';
+            this.$('remote-placeholder').hidden = true;
           }
         },
         onControlMessage: (msg) => this._handleRemoteControl(msg.action, msg.params),

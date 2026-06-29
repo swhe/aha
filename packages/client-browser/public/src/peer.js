@@ -20,6 +20,13 @@ export class Peer {
     this.pendingIce = [];
     this.remoteDescSet = false;
     this._relayPlayer = null;
+    // Single MediaStream we accumulate remote tracks into. WebRTC fires one
+    // ontrack per inbound track, and `e.streams[0]` is unreliable when the
+    // peer called addTrack() multiple times — some browsers (and some SDP
+    // shapes) leave later tracks without a stream, so attaching e.streams[0]
+    // to <video> skips them. Merging into our own stream guarantees every
+    // track is reachable.
+    this._remoteStream = new MediaStream();
 
     this.pc.onicecandidate = (e) => {
       if (e.candidate) {
@@ -28,7 +35,18 @@ export class Peer {
     };
 
     this.pc.ontrack = (e) => {
-      if (this.onRemoteStream) this.onRemoteStream(e.streams[0]);
+      // Add every inbound track into our merged MediaStream. Adding the same
+      // track twice is a no-op in MediaStream, so re-firing ontrack (which
+      // happens when SDP is renegotiated) is safe.
+      try { this._remoteStream.addTrack(e.track); } catch (_) { /* duplicate */ }
+      // Also drain any pre-existing tracks from e.streams[0] so we never miss
+      // tracks that arrived in earlier ontrack events for the same stream.
+      if (e.streams && e.streams[0]) {
+        for (const t of e.streams[0].getTracks()) {
+          try { this._remoteStream.addTrack(t); } catch (_) {}
+        }
+      }
+      if (this.onRemoteStream) this.onRemoteStream(this._remoteStream);
     };
 
     this.pc.oniceconnectionstatechange = () => {
@@ -193,6 +211,12 @@ export class Peer {
     if (this._relayPlayer) {
       try { this._relayPlayer.ctx.close(); } catch (_) {}
       this._relayPlayer = null;
+    }
+    if (this._remoteStream) {
+      for (const t of this._remoteStream.getTracks()) {
+        try { t.stop(); } catch (_) {}
+      }
+      this._remoteStream = null;
     }
   }
 
