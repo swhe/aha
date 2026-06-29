@@ -278,6 +278,16 @@ class TUI {
     this._stopRing();
     try { this.screen.destroy(); } catch (_) {}
   }
+
+  cleanupDialog() {
+    this._cleanupDialogKeys();
+    this._stopRing();
+    if (this.dialog) {
+      this.dialog.destroy();
+      this.dialog = null;
+      this.screen.render();
+    }
+  }
 }
 
 module.exports = TUI;

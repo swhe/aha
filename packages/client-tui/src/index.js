@@ -168,19 +168,27 @@ function _handle(m) {
     }
     case MSG.CALL_REJECT: {
       const reason = m.payload.reason || 'reject';
-      tui.showNotification(`对方${reason === 'busy' ? '忙' : '拒绝了'}`);
+      tui.showNotification(`对方${reason === 'busy' ? '忙' : '已拒绝'}`);
       cleanupCall();
       tui.setStatus('已连接,等待通话...');
       break;
     }
     case MSG.CALL_HANGUP: {
-      tui.showNotification(`对方已挂断 (${m.payload.reason || ''})`);
+      tui.showNotification('对方已挂断');
       cleanupCall();
       tui.setStatus('已连接,等待通话...');
       break;
     }
     case MSG.CALL_STATUS_UPDATE: {
-      if ([CALL_STATUS.ENDED, CALL_STATUS.REJECTED, CALL_STATUS.MISSED].includes(m.payload.status)) {
+      if (m.payload.status === CALL_STATUS.ENDED) {
+        tui.showNotification('通话已结束');
+        cleanupCall();
+        tui.setStatus('已连接,等待通话...');
+      } else if (m.payload.status === CALL_STATUS.MISSED) {
+        tui.showNotification('未接来电');
+        cleanupCall();
+        tui.setStatus('已连接,等待通话...');
+      } else if (m.payload.status === CALL_STATUS.REJECTED) {
         cleanupCall();
         tui.setStatus('已连接,等待通话...');
       }
@@ -192,7 +200,8 @@ function _handle(m) {
       break;
     }
     case MSG.RELAY_START_ACK: {
-      if (state.currentCall) state.currentCall.relayMode = true;
+      if (!state.currentCall) break;
+      state.currentCall.relayMode = true;
       tui.showNotification(`已进入中继模式 (${m.payload.mediaType})`);
       tui.setStatus('通话中(中继)');
       break;
@@ -251,15 +260,7 @@ function startPipeline() {
   state.pipeline = new AudioPipeline({
     log,
     onError: (kind, code) => {
-      const dev = kind === 'capture'
-        ? (opts.capture || (audioBackend === 'pulse' ? 'pulse:default' : detectAlsaDevice('capture')))
-        : (opts.playback || (audioBackend === 'pulse' ? 'pulse:default' : detectAlsaDevice('playback')));
-      const hint = audioBackend === 'pulse'
-        ? '检查 PulseAudio / pactl list short sources,sinks 是否能看到设备'
-        : '同机 ALSA 设备独占,可能已有另一个 TUI 占用,或加 --audio-backend pulse 切到 PulseAudio';
-      tui.showNotification(
-        `音频${kind === 'capture' ? '采集' : '播放'}失败 (${dev}): ffmpeg exit=${code} — ${hint}`,
-      );
+      log(`audio ${kind} failed: ffmpeg exit=${code}`);
     },
     onOpusFrame: (frame) => {
       if (state.currentCall && state.currentCall.relayMode && signaling.isOpen()) {
@@ -277,12 +278,6 @@ function startPipeline() {
   state.pipeline.setDevices({ capture: opts.capture, playback: opts.playback });
   state.pipeline.start().catch((e) => {
     log('pipeline start failed: ' + e.message);
-    const hint = audioBackend === 'pulse'
-      ? '检查 PulseAudio 是否在运行 (pactl info)'
-      : '同机 ALSA 设备独占,可能已有另一个 TUI 占用,或加 --audio-backend pulse 切到 PulseAudio';
-    tui.showNotification(
-      `音频管线启动失败 — ${hint}`,
-    );
   });
   return state.pipeline;
 }
@@ -388,6 +383,7 @@ function hangup() {
 
 function cleanupCall() {
   stopPipeline();
+  tui.cleanupDialog();
   state.currentCall = null;
   state.pendingOffer = null;
   tui.setDetail({});
