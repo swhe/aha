@@ -69,7 +69,7 @@ const signaling = new Signaling({
   onMessage: (m) => handle(m),
   onClose: () => {
     state.connected = false;
-    tui.setHeader({ clientId: state.clientId, name: state.name, autoAnswer: state.autoAnswer, connected: false });
+    tui.setHeader({ clientId: state.clientId, name: state.name, autoAnswer: state.autoAnswer, connected: false, backend: audioBackend });
     tui.setStatus('已断开,正在重连...');
   },
 });
@@ -86,7 +86,7 @@ async function main() {
     });
     log('registered as ' + state.clientId);
     state.connected = true;
-    tui.setHeader({ clientId: state.clientId, name: state.name, autoAnswer: state.autoAnswer, connected: true });
+    tui.setHeader({ clientId: state.clientId, name: state.name, autoAnswer: state.autoAnswer, connected: true, backend: audioBackend });
     tui.setStatus('已连接,等待通话...');
     setInterval(refreshDetail, 1000);
     startHeartbeatTick();
@@ -114,7 +114,7 @@ function _handle(m) {
       state.clientId = p.self?.clientId || state.clientId;
       state.name = p.self?.name || state.name;
       state.peers = p.peers || [];
-      tui.setHeader({ clientId: state.clientId, name: state.name, autoAnswer: state.autoAnswer, connected: true });
+      tui.setHeader({ clientId: state.clientId, name: state.name, autoAnswer: state.autoAnswer, connected: true, backend: audioBackend });
       tui.setPeers(state.peers);
       tui.setStatus(`在线: ${state.peers.length} 个客户端`);
       break;
@@ -432,7 +432,7 @@ function handleRemoteControl(payload) {
 
 function toggleAuto() {
   state.autoAnswer = !state.autoAnswer;
-  tui.setHeader({ clientId: state.clientId, name: state.name, autoAnswer: state.autoAnswer, connected: state.connected });
+  tui.setHeader({ clientId: state.clientId, name: state.name, autoAnswer: state.autoAnswer, connected: true, backend: audioBackend });
   tui.showNotification(`自动应答已${state.autoAnswer ? '开启' : '关闭'} (重新连接后生效)`);
 }
 

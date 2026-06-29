@@ -136,10 +136,11 @@ class TUI {
     });
   }
 
-  setHeader({ clientId, name, autoAnswer, connected }) {
+  setHeader({ clientId, name, autoAnswer, connected, backend }) {
     const conn = connected ? '{green-fg}●已连接{/}' : '{red-fg}●未连接{/}';
     const auto = autoAnswer ? '{green-fg}自动应答:开{/}' : '{gray-fg}自动应答:关{/}';
-    this.header.setContent(` {bold}AHA{/bold} | ${conn} | ${auto} | ID: ${shortId(clientId)} (${name || '匿名'}) `);
+    const bk = backend ? `{gray-fg}audio:${backend}{/}` : '';
+    this.header.setContent(` {bold}AHA{/bold} | ${conn} | ${auto} | ID: ${shortId(clientId)} (${name || '匿名'}) | ${bk} `);
     this.screen.render();
   }
 
